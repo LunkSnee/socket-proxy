@@ -5,9 +5,11 @@ permissions:
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - develop
+    inputs:
+      branch:
+        description: 'Branch to build from'
+        required: true
+        default: 'main'
 
 jobs:
 
@@ -20,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.branch }}
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -42,12 +46,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Login to GitHub Container Registry
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
@@ -55,7 +53,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image to Docker Hub and GHCR
+      - name: Build and push image to GHCR
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         id: push-all
         with:
@@ -64,10 +62,8 @@ jobs:
           push: true
           build-args: VERSION=testing-${{ github.sha }}
           tags: |
-            docker.io/wollomatic/socket-proxy:testing
-            docker.io/wollomatic/socket-proxy:testing-${{ github.sha }}
-            ghcr.io/wollomatic/socket-proxy:testing
-            ghcr.io/wollomatic/socket-proxy:testing-${{ github.sha }}
+            ghcr.io/${{ github.repository }}:testing
+            ghcr.io/${{ github.repository }}:testing-${{ github.sha }}
 
 #      - name: Build and push Docker Hub image
 #        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0

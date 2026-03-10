@@ -4,8 +4,11 @@ permissions:
   packages: write
 
 on:
-   push:
-     tags: ['*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
 
 jobs:
 
@@ -32,10 +35,6 @@ jobs:
       - name: Run Go tests
         run: go test ./...
 
-      - name: Extract tag name
-        id: get_tag
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
         with:
@@ -44,36 +43,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Login to GitHub Container Registry
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker Hub image
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        id: push-dockerhub
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64
-          push: true
-          build-args: VERSION=${{ steps.get_tag.outputs.VERSION }}
-          tags: |
-            docker.io/wollomatic/socket-proxy:${{ steps.get_tag.outputs.VERSION }}
-            docker.io/wollomatic/socket-proxy:1
-
-      - name: Sign Docker Hub image
-        run: cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY docker.io/wollomatic/socket-proxy:${{ steps.get_tag.outputs.VERSION }}@${{ steps.push-dockerhub.outputs.digest }}
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
 
       - name: Build and push GHCR image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
@@ -82,13 +57,13 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm/v7,linux/arm64
           push: true
-          build-args: VERSION=${{ steps.get_tag.outputs.VERSION }}
+          build-args: VERSION=${{ github.event.inputs.version }}
           tags: |
-            ghcr.io/wollomatic/socket-proxy:${{ steps.get_tag.outputs.VERSION }}
-            ghcr.io/wollomatic/socket-proxy:1
+            ghcr.io/${{ github.repository }}:${{ github.event.inputs.version }}
+            ghcr.io/${{ github.repository }}:1
 
       - name: Sign GHCR image
-        run: cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY ghcr.io/wollomatic/socket-proxy:${{ steps.get_tag.outputs.VERSION }}@${{ steps.push-ghcr.outputs.digest }}
+        run: cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY ghcr.io/${{ github.repository }}:${{ github.event.inputs.version }}@${{ steps.push-ghcr.outputs.digest }}
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
