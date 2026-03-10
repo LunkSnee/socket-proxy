@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/wollomatic/socket-proxy/internal/config"
 )
@@ -81,23 +82,41 @@ func isAllowedClient(clientIPStr string) (bool, error) {
 	}
 
 	for _, allowFromItem := range cfg.AllowFrom {
+		// In some situations Docker hands back IPv6 addresses with a prefix
+		// length ("/64"). net.ParseCIDR handles those, but net.LookupIP and
+		// net.ParseIP do not – they call netip.ParseAddr internally which
+		// rejects the trailing "/<len>". In order to make such values usable we
+		// normalise them here.
+		item := allowFromItem
+		if strings.Contains(item, "/") {
+			// Try parsing it as a CIDR first.  If it succeeds we can perform the
+			// containment check and move on; otherwise strip the prefix length and
+			// fall through to the hostname/IP handling below.
+			if _, allowedIPNet, err := net.ParseCIDR(item); err == nil {
+				if allowedIPNet.Contains(clientIP) {
+					return true, nil
+				}
+				continue
+			}
+			parts := strings.SplitN(item, "/", 2)
+			item = parts[0]
+		}
 
-		// first try to handle as an CIDR
-		_, allowedIPNet, err := net.ParseCIDR(allowFromItem)
-		if err == nil {
-			// AllowFrom is a valid CIDR, so check if IP address is in allowed network
-			if allowedIPNet.Contains(clientIP) {
+		// next try to treat the (possibly trimmed) item as a literal IP address
+		if parsed := net.ParseIP(item); parsed != nil {
+			if parsed.Equal(clientIP) {
 				return true, nil
 			}
+			// not a match, continue to the next allow-from entry
 			continue
 		}
 
-		// AllowFrom is not a valid CIDR, so try to resolve it via DNS
-		// We intentionally do not cache the DNS lookups.
-		// In our use case, the resolver should be a local service, and we don't want to cause DNS caching errors.
-		ips, err := net.LookupIP(allowFromItem)
+		// AllowFrom is not a CIDR or literal IP, so resolve it via DNS. We
+		// intentionally do not cache the DNS lookups – in our use case the
+		// resolver should be local and caching could lead to stale entries.
+		ips, err := net.LookupIP(item)
 		if err != nil {
-			slog.Warn("error looking up allowed client hostname", "hostname", allowFromItem, "error", err.Error())
+			slog.Warn("error looking up allowed client hostname", "hostname", item, "error", err.Error())
 		}
 		for _, ip := range ips {
 			// Check if the IP address is one of the resolved IPs
